@@ -1,18 +1,10 @@
 <?php
-/**
- * @param string $string
- * @return array $tokens
- */
 function analyzer($string)
 {
 	$string = trim(str_replace(array('(', ')'), array(' ( ', ' ) '), $string));
 	return preg_split('/\s+/', $string);
 }
 
-/**
- * @param array $tokens
- * @return array $expressions
- */
 function parser(&$tokens)
 {
 	$expressions = array();
@@ -37,14 +29,14 @@ function parser(&$tokens)
 	return $expressions;
 }
 
-function evaluate($expression, $environment)
+function evaluate($expression, &$environment)
 {
 	$expression_types = array(
 		// primitives
 		'number', 'string', 'boolean', 'variable', 
 
 		//specail forms
-		//'if', 'define', 'quote', 'cond', 'lambda', 'begin',
+		'if', 'define', 'quote', 'cond', 'lambda', 
 
 		//application
 		'application',
@@ -67,19 +59,20 @@ function apply($procedure, $arguments)
 {
 	if (is_primitive_procedure($procedure))
 	{
-		return call_user_func_array($procedure[1], $arguments);
+		return call_user_func_array($procedure, $arguments);
 	}
 	elseif (is_compound_procedure($procedure))
 	{
-		$new_environment = extend_enviroment(procedure_environment($procedure), procedure_parameters($procedure), $arguments);
-		return evaluate(procedure_body($procedure), $new_environment);
+		$new_environment = extend_environment($procedure['environment'], $procedure['parameters'], $arguments);
+		return evaluate_sequence($procedure['body'], $new_environment);
 	}
 	else
 	{
-		error('unknow procedure');
+		exit('unknow procedure');
 	}
 }
 
+/* check expression type start */
 function is_lisp_number($expression)
 {
 	return is_numeric($expression);
@@ -125,26 +118,13 @@ function is_lisp_quote($expression)
 	return tag_check($expression, 'quote');
 }
 
-function is_lisp_begin($expression)
-{
-	return tag_check($expression, 'begin');
-}
-
 function is_lisp_application($expression)
 {
 	return is_array($expression);
 }
+/* check expression type end */
 
-function is_primitive_procedure($procedure)
-{
-	return tag_check($procedure, 'primitive');
-}
-
-function is_compound_procedure($procedure)
-{
-	return tag_check($procedure, 'procedure');
-}
-
+/* evaluate expression start*/
 function evaluate_number($expression)
 {
 	return $expression;
@@ -160,11 +140,11 @@ function evaluate_boolean($expression)
 	return $expression === '#f' ? false : true;
 }
 
-function evaluate_variable($expression, $environment)
+function evaluate_variable($expression, &$environment)
 {
-	if (isset($environment['list'][$expression]))
+	if (isset($environment['frame'][$expression]))
 	{
-		return $environment['list'][$expression];
+		return $environment['frame'][$expression];
 	}
 	elseif ($environment['parent'])
 	{
@@ -172,24 +152,56 @@ function evaluate_variable($expression, $environment)
 	}
 	else
 	{
-		error('undefined variable');
+		exit('undefined variable');
 	}
-}
-
-function evaluate_if($expression, $environment)
-{
-	return evaluate($expression[1], $environment) ? evaluate($expression[2], $environment) : evaluate($expression[3], $environment);
 }
 
 function evaluate_define($expression, &$environment)
 {
-	$environment[$expression[1]] = evaluate($expression[2]);
+	$environment['frame'][$expression[1]] = evaluate($expression[2], $environment);
 	return null;
 }
 
-function evaluate_application($expression, $environment)
+function evaluate_lambda($expression, &$environment)
 {
-	$evaluate_callback = function($expression) use ($environment) {
+	return array(
+		'type' => 'procedure',
+		'parameters' => $expression[1],
+		'body' => array_slice($expression, 2),
+		'environment' => &$environment,
+	);
+}
+
+function evaluate_if($expression, &$environment)
+{
+	return evaluate($expression[1], $environment) ? evaluate($expression[2], $environment) : evaluate($expression[3], $environment);
+}
+
+function evaluate_cond($expression, &$environment)
+{
+	$cond_clauses = array_slice($expression, 1);
+	foreach($cond_clauses as $clause)
+	{
+		if ($clause[0] === 'else')
+		{
+			return evaluate($clause[1], $environment);
+		}
+
+		if (evaluate($clause[0], $environment))
+		{
+			return evaluate($clause[1], $environment);
+		}
+	}
+}
+
+function evaluate_quote($expression)
+{
+	return $expression[1];
+}
+
+function evaluate_application($expression, &$environment)
+{
+	$evaluate_callback = function($expression) use (&$environment) {
 		return evaluate($expression, $environment);
 	};
 	$expression = array_map($evaluate_callback, $expression);
@@ -199,9 +211,26 @@ function evaluate_application($expression, $environment)
 	return apply($operator, $operands);
 }
 
-function error($msg)
+/* evaluate expression end */
+
+function is_primitive_procedure($procedure)
 {
-	trigger_error($msg, E_USER_ERROR);
+	return is_callable($procedure);
+}
+
+function is_compound_procedure($procedure)
+{
+	return is_array($procedure) && $procedure['type'] === 'procedure';
+}
+
+function evaluate_sequence($expressions, &$environment)
+{
+	foreach($expressions as $expression)
+	{
+		$return = evaluate($expression, $environment);
+	}
+
+	return $return;
 }
 
 function tag_check($expression, $tag)
@@ -209,13 +238,37 @@ function tag_check($expression, $tag)
 	return is_array($expression) && $expression[0] === $tag;
 }
 
-function environment_extend($environment, $parameters, $arguments)
+function extend_environment(&$environment, $parameters, $arguments)
 {
 	if (count($parameters) !== count($arguments))
 	{
-		error('wrong argument numbers');
+		exit('wrong argument numbers');
 	}
 
-	$list = array_combine($parameters, $arguments);
-	return array('list' => $list, 'parent' => &$environment);
+	$frame = array_combine($parameters, $arguments);
+	return array(
+		'frame' => $frame,
+		'parent' => &$environment,
+	);
+}
+
+function global_environment()
+{
+	return array(
+		'parent' => null,
+		'frame' => array(
+			'+' => function(){return array_sum(func_get_args());},
+			'-' => function($x, $y){return $x - $y;},
+			'*' => function(){return array_product(func_get_args());},
+			'/' => function($x, $y){return $x / $y;},
+			'>' => function($x, $y){return $x > $y;},
+			'<' => function($x, $y){return $x < $y;},
+		),
+	);
+}
+
+function lisp_eval($strings)
+{
+	$GE = global_environment();
+	return evaluate_sequence(parser(analyzer($strings)), $GE);
 }
