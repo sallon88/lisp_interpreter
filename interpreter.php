@@ -1,6 +1,17 @@
 <?php
 function analyzer($string)
 {
+	// convert 'a， '(1 2 3) to (quote a) (quote (1 2 3))
+	$string = preg_replace('/(?<=\s)\'
+		(
+			[^\s]++
+			|
+		   	(\(([^()]|(?2))*\))
+		)
+	/x',
+   	'(quote \\1)', $string);
+
+	// split to tokens
 	$string = trim(str_replace(array('(', ')'), array(' ( ', ' ) '), $string));
 	return preg_split('/\s+/', $string);
 }
@@ -37,6 +48,7 @@ function evaluate($expression, &$environment)
 
 		//specail forms
 		'if', 'define', 'quote', 'cond', 'lambda', 
+		'let',
 
 		//application
 		'application',
@@ -118,6 +130,11 @@ function is_lisp_quote($expression)
 	return tag_check($expression, 'quote');
 }
 
+function is_lisp_let($expression)
+{
+	return tag_check($expression, 'let');
+}
+
 function is_lisp_application($expression)
 {
 	return is_array($expression);
@@ -158,7 +175,20 @@ function evaluate_variable($expression, &$environment)
 
 function evaluate_define($expression, &$environment)
 {
-	$environment['frame'][$expression[1]] = evaluate($expression[2], $environment);
+	if (is_string($expression[1]))
+	{
+		$environment['frame'][$expression[1]] = evaluate($expression[2], $environment);
+	}
+	elseif (is_array($expression[1]))
+	{
+		$lambda_name = array_shift($expression[1]);
+		$lambda_parameters = $expression[1];
+		$lambda_body = array_slice($expression, 2);
+
+		$lambda_expression = array_merge(array('lambda', $lambda_parameters), $lambda_body);
+		$environment['frame'][$lambda_name] = evaluate($lambda_expression, $environment);
+	}
+
 	return null;
 }
 
@@ -209,6 +239,18 @@ function evaluate_application($expression, &$environment)
 	$operator = $expression[0];
 	$operands = array_slice($expression, 1);
 	return apply($operator, $operands);
+}
+
+function evaluate_let($expression, &$environment)
+{
+	$let_names = array_map(function($a){return $a[0];}, $expression[1]);
+	$let_values = array_map(function($a){return evaluate($a[1], $environment);}, $expression[1]);
+	$let_body = array_slice($expression, 2);
+
+	$lambda_expression = array_merge(array('lambda', $let_names), $let_body);
+	$lambda_compound = array_merge(array($lambda_expression), $let_values);
+
+	return evaluate($lambda_compound, $environment);
 }
 
 /* evaluate expression end */
@@ -263,6 +305,7 @@ function global_environment()
 			'/' => function($x, $y){return $x / $y;},
 			'>' => function($x, $y){return $x > $y;},
 			'<' => function($x, $y){return $x < $y;},
+			'eq?' => function($x, $y){return $x === $y;},
 		),
 	);
 }
