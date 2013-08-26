@@ -311,7 +311,9 @@ function global_environment()
 			'*' => function(){return array_product(func_get_args());},
 			'/' => function($x, $y){return $x / $y;},
 			'>' => function($x, $y){return $x > $y;},
+			'>=' => function($x, $y){return $x >= $y;},
 			'<' => function($x, $y){return $x < $y;},
+			'<=' => function($x, $y){return $x <= $y;},
 			'eq?' => function($x, $y){return $x === $y;},
 		),
 		null

@@ -1,12 +1,19 @@
 this is a minimal implementation of scheme (a lisp dialect) in php language.
 
-support syntax:
-define lambda if cond let quote set!
+special forms:
+
+	define lambda if cond let quote set! 
+	
+primitive procedures:
+
+	+ - * / > < >= <= eq?
 
 usage:
-php repl.php
+
+	php repl.php
 
 example:
+
 	(define a 2)
 	==> 
 	a
